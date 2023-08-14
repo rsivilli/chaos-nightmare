@@ -158,8 +158,7 @@ class SDClient(object):
     def _decode_image(self,image_str:str):
         imgdata = base64.b64decode(image_str)
         image = Image.open(io.BytesIO(imgdata))
-        image_np = np.array(image)
-        return image_np
+        return image
                                         
     async def interrupt(self,uri:str = "/sdapi/v1/interrupt"):
         if self.session is None:

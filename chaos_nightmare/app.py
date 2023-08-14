@@ -18,12 +18,13 @@ import numpy as np
 import random 
 
 from sd_client import SDClient
-from util.image_tools import is_filtered_image
+from util.image_tools import is_filtered_image, load_images, load_list_file
 from constants import HELP_TEXT
 
 from PIL import Image, ImageDraw, ImageFont
 from datetime import datetime
 from json import load
+from chaos_nightmare.views import ViewContainer,CurrentImageView,HistoryView, PromptView
 logger = logging.getLogger(__name__)
 
 
@@ -40,7 +41,7 @@ class BOTMODE(str,Enum):
 
 class Chatbot(commands.Bot):
     mode:BOTMODE = BOTMODE.COLLABORATE
-    positive_prompt:str = ""
+    _positive_prompt:str = ""
     negative_prompt: str = ""
     positive_prompt_options:set[str] = set()
     negative_prompt_options:set[str] = set()
@@ -52,8 +53,8 @@ class Chatbot(commands.Bot):
     iteration_counter:int = 0
     iteration_thresh = 5
     always_negative = "child, nude, naked, breasts, penis, sex, murder, loli "
-    safe_images:list[np.ndarray] = []
-    loading_images:list[np.ndarray] = []
+    safe_images:list[Image.Image] = []
+    loading_images:list[Image.Image] = []
     stream_progress:bool = False
     last_raw_frame:np.ndarray = None
     random_prompts:list[str] = []
@@ -64,27 +65,41 @@ class Chatbot(commands.Bot):
 
     def __init__(self, config:Config = Config()):
 
-        self.cam = pyvirtualcam.Camera(width=1024,height=1024,fps = config.target_fps,backend="obs")
+        self.cam = pyvirtualcam.Camera(width=2560,height=1440,fps = config.target_fps,backend="obs")
         logger.info(f'Using virtual camera | {self.cam.device}')
         self.sd_client = SDClient(base_url=config.base_sd_url)
         self.base = np.zeros((self.cam.height, self.cam.width, 3), np.uint8)
         self.iteration_thresh = config.iteration_thresh
         self.stream_progress = config.stream_progress
 
-        self.safe_images = self._load_images(config.safe_image_dir)
-        self.loading_images = self._load_images(config.loading_image_dir)
-        self.random_prompts = self._load_list_file(config.random_prompt_file)
+        self.safe_images = load_images(config.safe_image_dir)
+        self.loading_images = load_images(config.loading_image_dir)
+        self.random_prompts = load_list_file(config.random_prompt_file)
+        self.view_container = ViewContainer(2560,1440)
+        self.main_view = CurrentImageView(1024,1024)
+        self.history_view = HistoryView(1024,1024)
+        self.prompt_view = PromptView(1024,416)
+        self.view_container.add_view(self.main_view,2560-1024,0)
+        self.view_container.add_view(self.history_view,0,0)
+        self.view_container.add_view(self.prompt_view,2560-1024,1025)
 
         super().__init__(token=config.access_token, initial_channels=['dreamingOfElectricSheep'],prefix="!")
     
+    @property
+    def positive_prompt(self):
+        return self._positive_prompt
+    @positive_prompt.setter
+    def positive_prompt(self,value):
+        self._positive_prompt = value
+        self.prompt_view.update_prompt(value)
 
-    def send_frame(self, frame:np.ndarray):
-        self.last_raw_frame = frame
-        self.cam.send(self.decorate_frame(frame))
+    @routines.routine(seconds=1)
+    async def send_frame(self):
+        self.cam.send(self.view_container.generate_view())
 
     async def reset_generation(self):
         channel:Channel = self.connected_channels[0]
-        await channel.send("That's the last image for this set! Starting everything fresh!")
+        # await channel.send("That's the last image for this set! Starting everything fresh!")
         
         self.last_image = ""
         self.positive_prompt = ""
@@ -96,12 +111,6 @@ class Chatbot(commands.Bot):
 
 
 
-    def _load_list_file(self,file:str):
-        out = []
-        with open(file) as f:
-            out = load(f)
-        return out
-
         
     def _reset_cooldowns(self):
         cooldown:Cooldown
@@ -112,42 +121,22 @@ class Chatbot(commands.Bot):
             logger.debug(f"Resetting cooldown for negative prompts")
             cooldown.reset()
     
-    def _load_images(self, dir:str):
-        out = []
-        files = Path(dir).glob("*.png")
 
-        for f in files:
-            image = Image.open(f).convert("RGB")
-            out.append(np.array(image))
 
         
-        logger.info(f"{len(out)} images were found and loaded")
-        return out
+        
 
-    def get_safe_image(self)->np.ndarray:
+    def get_safe_image(self)->Image.Image:
         return random.choice(self.safe_images)
-    def get_loading_image(self)->np.ndarray:
+    def get_loading_image(self)->Image.Image:
         return random.choice(self.loading_images)
-    def decorate_frame(self,frame:np.ndarray)->np.ndarray:
-        img = Image.fromarray(frame.astype("uint8"),"RGB")
-        w,h,_ = frame.shape
-        d1 = ImageDraw.Draw(img)
-        font = ImageFont.truetype("fonts./PressStart2P-Regular.ttf",20)
-        col_text = f"Time till image collection: {str(self.submit_generation.time_till_execution).split('.')[0]}"
-        offset_x = font.getlength(col_text)
-        d1.text((int(w/2)-int(offset_x/2),10),col_text,fill = (255,255,255),font=font)
-        gen_text = f"Current Image Generation: {self.iteration_counter} Generations Left: {self.iteration_thresh-self.iteration_counter}"
-        offset_x = font.getlength(gen_text)
-        d1.text((int(w/2)-int(offset_x/2),h-20), gen_text,fill=(255,255,255), font=font)
-        if self.generating_image:
-            gen_text = f"Image generation in Progress!"
-            offset_x = font.getlength(gen_text)
-            d1.text((int(w/2)-int(offset_x/2),int(h/2)), gen_text,fill=(255,255,255), font=font)
 
-
-        return np.array(img)
     @routines.routine(minutes=1)
     async def submit_generation(self):
+        if len(self.connected_channels)<1:
+            logger.error("We are not currently connected to any channels!")
+            return
+        
         channel:Channel = self.connected_channels[0]
 
         if (self.generating_image):
@@ -159,12 +148,12 @@ class Chatbot(commands.Bot):
             self.positive_prompt_options.add(tmp)
             self.positive_prompt = tmp
             await channel.send(f"Looks like we're having trouble thinking of something. A random prompt has been generated to start us off")
-            await channel.send(f"Prompt for Generation {self.iteration_counter} is now: {self.positive_prompt}")
+            
         
         
         #We're assuming this is only for one channel
         
-        await channel.send(f"We're now submitting {self.iteration_counter} for image generation. All additional prompts will be used for the next generation unless this is the last generation")
+        # await channel.send(f"We're now submitting {self.iteration_counter} for image generation. All additional prompts will be used for the next generation unless this is the last generation")
 
 
         logger.info("Submitting for image generation")
@@ -187,8 +176,9 @@ class Chatbot(commands.Bot):
                 frame = self.get_safe_image()
                 await self.reset_generation()
 
-            self.send_frame(frame)
-            self.generation_history.append(frame)
+            self.main_view.set_image(frame)
+            self.history_view.add_frame(frame)
+
             logger.debug("Done with sending to cam")
         self.generating_image = False
         
@@ -203,31 +193,39 @@ class Chatbot(commands.Bot):
         
     @routines.routine(seconds=1)
     async def update_metrics(self):
-        self.send_frame(self.last_raw_frame)
-        
+        self.main_view.update_stats(
+            generating_image=self.generating_image,
+            time_till_image_gen=self.submit_generation.time_till_execution,
+            iteration_thresh=self.iteration_thresh,
+            iteration_counter=self.iteration_counter
+        )        
 
 
 
     @routines.routine(seconds=2)
     async def check_progress(self):
+        
         if not self.generating_image:
             return
-        logger.info("Checking progress of generation")
-        progress = await self.sd_client.get_progress()
-        if progress.current_image is not None and self.stream_progress:
-            logger.debug("There's an image in progress!")
-            frame = self.sd_client._decode_image(progress.current_image)
-            w,h,d = frame.shape
-            b_w, b_h, b_d = self.base.shape
-            diff_w = int((b_w-w)/2)
-            diff_h = int((b_h-h)/2)
-            padded_frame = np.pad(frame,((diff_w,diff_w),(diff_h,diff_h),(0,0)),mode="constant",constant_values=0)
-            #We check just before to make sure we don't stomp on a newly generated image
-            if self.generating_image:
-                self.send_frame(padded_frame+self.base)
         else:
-            if self.generating_image:
-                self.send_frame(self.get_loading_image())
+            self.main_view.set_image(self.get_loading_image())
+
+                
+        # logger.info("Checking progress of generation")
+        # progress = await self.sd_client.get_progress()
+        # if progress.current_image is not None and self.stream_progress:
+        #     logger.debug("There's an image in progress!")
+        #     frame = self.sd_client._decode_image(progress.current_image)
+        #     w,h,d = frame.shape
+        #     b_w, b_h, b_d = self.base.shape
+        #     diff_w = int((b_w-w)/2)
+        #     diff_h = int((b_h-h)/2)
+        #     padded_frame = np.pad(frame,((diff_w,diff_w),(diff_h,diff_h),(0,0)),mode="constant",constant_values=0)
+        #     #We check just before to make sure we don't stomp on a newly generated image
+        #     if self.generating_image:
+        #         self.send_frame(padded_frame+self.base)
+            
+
         
     @commands.cooldown(rate =1 ,per = 300, bucket=Bucket.member)
     @commands.command()
@@ -258,9 +256,7 @@ class Chatbot(commands.Bot):
         # Alerting that we are logged in and ready to use commands
         logger.info(f"Logged in as | {self.nick}")
         logger.info(f"User id is | {self.user_id}")
-        frame = np.zeros((self.cam.height, self.cam.width, 3), np.uint8)  # RGB
-        frame[:] = self.cam.frames_sent % 255  # grayscale animation
-        self.send_frame(frame)
+
 
     # @commands.cooldown(rate =1 ,per = 60, bucket=Bucket.member)        
     @commands.command()
@@ -303,8 +299,7 @@ class Chatbot(commands.Bot):
             self.positive_prompt = ", ".join(self.positive_prompt_options)
         elif self.mode == BOTMODE.COMPETE:
             self.positive_prompt = random.choice(self.positive_prompt_options)
-        
-        await ctx.send(f"Prompt for Generation {self.iteration_counter} is now: {self.positive_prompt}")
+        # await ctx.send(f"Prompt for Generation {self.iteration_counter} is now: {self.positive_prompt}")
     
     # @commands.cooldown(rate=1,per=300,bucket=Bucket.user)
     # async def event_join(channel: Channel, user:User):
@@ -339,5 +334,6 @@ if __name__ == "__main__":
     # bot.update_cam.change_interval(seconds=config.target_fps)
     bot.submit_generation.start(stop_on_error=False)
     bot.update_metrics.start(stop_on_error=False)
+    bot.send_frame.start(stop_on_error=False)
 
     bot.run()
