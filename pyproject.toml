@@ -20,6 +20,9 @@ aiohttp = "^3.8.5"
 asyncio = "^3.4.3"
 
 
+[tool.poetry.group.Dev.dependencies]
+black = "^23.7.0"
+
 [build-system]
 requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"
