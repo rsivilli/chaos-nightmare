@@ -1,6 +1,6 @@
 import logging.config
 from pythonjsonlogger import jsonlogger
-import logging 
+import logging
 
 LOGGING = {
     "version": 1,
