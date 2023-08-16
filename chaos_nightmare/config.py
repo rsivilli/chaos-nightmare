@@ -17,7 +17,9 @@ class Config(BaseSettings):
     stream_progress: bool = False
     safe_image_dir: str = "./safe_images"
     loading_image_dir: str = "./loading_images"
+    error_image_dir: str = "./error_images"
     random_prompt_file: str = "./random_prompts.json"
-
+    gpt_prompt_file:str = "./gpt_prompts.json"
+    chat_key:str = None
 
 config = Config()

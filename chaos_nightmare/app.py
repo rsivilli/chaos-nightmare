@@ -28,12 +28,16 @@ from chaos_nightmare.views import (
     CurrentImageView,
     HistoryView,
     PromptView,
+    ContributorView
 )
+
+from chaos_nightmare.routines import send_frame
+from chaos_nightmare.prompt_gen import PromptGenerator
 
 logger = logging.getLogger(__name__)
 
 
-COMMAND_FILTER = r"^[a-zA-Z0-9\s]"
+COMMAND_FILTER = r"\W"
 
 
 class BOTMODE(str, Enum):
@@ -59,7 +63,8 @@ class Chatbot(commands.Bot):
     loading_images: list[Image.Image] = []
     stream_progress: bool = False
     last_raw_frame: np.ndarray = None
-    random_prompts: list[str] = []
+    dreaming:bool = False
+
     generation_history = []
     interrupted: bool = False
 
@@ -77,15 +82,22 @@ class Chatbot(commands.Bot):
 
         self.safe_images = load_images(config.safe_image_dir)
         self.loading_images = load_images(config.loading_image_dir)
-        self.random_prompts = load_list_file(config.random_prompt_file)
+        self.error_images = load_images(config.error_image_dir)
         self.view_container = ViewContainer(2560, 1440)
         self.main_view = CurrentImageView(1024, 1024)
-        self.history_view = HistoryView(1024, 1024)
-        self.prompt_view = PromptView(1024, 416)
+        self.history_view = HistoryView(1024, 1024,max_size=9)
+        self.prompt_view = PromptView(2560, 416)
+        self.contributor_view = ContributorView(512,1024)
         self.view_container.add_view(self.main_view, 2560 - 1024, 0)
         self.view_container.add_view(self.history_view, 0, 0)
-        self.view_container.add_view(self.prompt_view, 2560 - 1024, 1025)
+        self.view_container.add_view(self.prompt_view, 0, 1025)
+        self.view_container.add_view(self.contributor_view,1025,0)
 
+        self.prompt_generator = PromptGenerator(config)
+        
+        self.send_frame:Routine = send_frame
+        self.send_frame.start(self.cam,self.view_container)
+        
         super().__init__(
             token=config.access_token,
             initial_channels=["dreamingOfElectricSheep"],
@@ -101,9 +113,20 @@ class Chatbot(commands.Bot):
         self._positive_prompt = value
         self.prompt_view.update_prompt(value)
 
-    @routines.routine(seconds=1)
-    async def send_frame(self):
-        self.cam.send(self.view_container.generate_view())
+
+    async def event_message(self,message):
+        if message.echo:
+            return
+        await self.wake(message.channel)
+        if message.content[0] != "!":
+            sanitized_msg = self._sanitize_command(message.content)
+            self.handle_prompt(sanitized_msg,author_name=message.author.name)
+            return 
+        await self.handle_commands(message)
+
+
+
+            
 
     async def reset_generation(self):
         channel: Channel = self.connected_channels[0]
@@ -116,6 +139,7 @@ class Chatbot(commands.Bot):
         self.negative_prompt_options = set()
         self.iteration_counter = 0
         self.generation_history = []
+        self.contributor_view.reset()
 
     def _reset_cooldowns(self):
         cooldown: Cooldown
@@ -132,7 +156,7 @@ class Chatbot(commands.Bot):
     def get_loading_image(self) -> Image.Image:
         return random.choice(self.loading_images)
 
-    @routines.routine(minutes=1)
+    @routines.routine(minutes=1.5,wait_first=True)
     async def submit_generation(self):
         if len(self.connected_channels) < 1:
             logger.error("We are not currently connected to any channels!")
@@ -145,14 +169,20 @@ class Chatbot(commands.Bot):
                 "Looks like we're still generating an image. Skipping this call"
             )
             return
-        if len(self.positive_prompt) < 4:
+        
+        elif len(self.positive_prompt) < 4:
             logger.info("Current Prompt is less than 4 characters. Going to skip")
-            tmp = random.choice(self.random_prompts)
+            tmp = await self.prompt_generator.get_random_prompt()
             self.positive_prompt_options.add(tmp)
             self.positive_prompt = tmp
-            await channel.send(
-                f"Looks like we're having trouble thinking of something. A random prompt has been generated to start us off"
-            )
+            if not self.dreaming:
+                self.dreaming = True
+                await channel.send(
+                    f"Looks like folks are taking a break. I'm going to sleep, but send me a message to wake me up"
+                )
+        
+            
+
 
         # We're assuming this is only for one channel
 
@@ -162,35 +192,44 @@ class Chatbot(commands.Bot):
         self.generating_image = True
         self.check_progress.start(stop_on_error=False)
         self.iteration_counter += 1
-        if len(self.last_image) > 0:
-            response = await self.sd_client.img2img(
-                prompt=self.positive_prompt,
-                negative_prompt=self.always_negative + self.negative_prompt,
-                input_image=self.last_image,
-            )
-        else:
-            response = await self.sd_client.txt2img(
-                prompt=self.positive_prompt,
-                negative_prompt=self.always_negative + self.negative_prompt,
-            )
-        logger.debug("Image received")
-        if len(response.images) > 0 and not self.interrupted:
-            # For now, let's assume we're only generating one so far
-            self.last_image = response.images[0]
-            frame = self.sd_client._decode_image(response.images[0])
-            logger.debug("Done with decoding image")
-
-            if is_filtered_image(frame):
-                logger.info(
-                    "Filtered image detected. Injecting safe image and resetting"
+        try: 
+            if len(self.last_image) > 0:
+                response = await self.sd_client.img2img(
+                    prompt=self.positive_prompt,
+                    negative_prompt=self.always_negative + self.negative_prompt,
+                    input_image=self.last_image,
                 )
-                frame = self.get_safe_image()
-                await self.reset_generation()
+            else:
+                response = await self.sd_client.txt2img(
+                    prompt=self.positive_prompt,
+                    negative_prompt=self.always_negative + self.negative_prompt,
+                )
+            logger.debug("Image received")
+            if len(response.images) > 0 and not self.interrupted:
+                # For now, let's assume we're only generating one so far
+                self.last_image = response.images[0]
+                frame = self.sd_client._decode_image(response.images[0])
+                logger.debug("Done with decoding image")
 
-            self.main_view.set_image(frame)
-            self.history_view.add_frame(frame)
+                if is_filtered_image(frame):
+                    logger.info(
+                        "Filtered image detected. Injecting safe image and resetting"
+                    )
+                    frame = self.get_safe_image()
+                    await self.reset_generation()
 
-            logger.debug("Done with sending to cam")
+                self.main_view.set_image(frame)
+                self.history_view.add_frame(frame)
+
+                logger.debug("Done with sending to cam")
+        except Exception as error:
+            logger.error("Error submitting to generation")
+            logger.error(error)
+            self.check_progress.stop()
+            self.main_view.set_image(random.choice(
+                self.error_images
+            ))
+            
         self.generating_image = False
 
         logger.debug("Done with Image Gen")
@@ -200,12 +239,23 @@ class Chatbot(commands.Bot):
             self.interrupted = False
         elif self.iteration_counter >= self.iteration_thresh:
             await self.reset_generation()
+        
+
+    # @submit_generation.error
+    # async def submit_generation_on_error(self,error:Exception):
+    #     logger.error("Error submitting to generation")
+    #     logger.error(error)
+    #     self.check_progress.stop()
+    #     self.main_view.set_image(random.choice(
+    #         self.error_images
+    #     ))
+        
 
     @routines.routine(seconds=1)
     async def update_metrics(self):
         self.main_view.update_stats(
             generating_image=self.generating_image,
-            time_till_image_gen=self.submit_generation.time_till_execution,
+            time_till_image_gen=self.submit_generation.next_execution_time,
             iteration_thresh=self.iteration_thresh,
             iteration_counter=self.iteration_counter,
         )
@@ -239,7 +289,7 @@ class Chatbot(commands.Bot):
     @commands.command()
     async def explain(self, ctx: commands.Context):
         """Explains the requested command. Example !explain list_commands"""
-        cmd_name = self._sanitize_command(8, ctx).replace("!", "")
+        cmd_name = self._sanitize_command( ctx.message.content,9).replace("!", "")
         logger.debug(f"Explain for {cmd_name} called by {ctx.author}")
         cmd: Command = self.commands.get(cmd_name, None)
         if cmd is not None:
@@ -270,9 +320,14 @@ class Chatbot(commands.Bot):
         # Send a hello back!
         await ctx.reply(f"Hello {ctx.author.name}!")
 
-    def _sanitize_command(self, command_length: int, ctx: commands.Context) -> str:
-        trimmed_msg = ctx.message.content[command_length:]
-        return self.regsp.sub("", trimmed_msg).strip()
+    def _sanitize_command(self, content:str,command_length: int=None) -> str:
+        
+        if command_length is None:
+            trimmed_msg = content
+        else:
+            trimmed_msg = content[command_length:]
+        
+        return self.regsp.sub(" ", trimmed_msg).strip()
 
     @commands.cooldown(rate=1, per=300, bucket=Bucket.member)
     @commands.command()
@@ -288,6 +343,20 @@ class Chatbot(commands.Bot):
         # self.send_frame(frame)
 
         await ctx.reply("Setting the slate clean!")
+    def handle_prompt(self,prompt:str, author_name:str):
+        self.positive_prompt_options.add(prompt)
+        if self.mode == BOTMODE.COLLABORATE:
+            self.positive_prompt = ", ".join(self.positive_prompt_options)
+        elif self.mode == BOTMODE.COMPETE:
+            self.positive_prompt = random.choice(self.positive_prompt_options)
+        self.contributor_view.add_prompt(author_name,prompt)
+    async def wake(self,channel:Channel):
+        if self.dreaming:
+            await channel.send("Sorry, was just sleeping there. Happy to use your ideas too ;-)")
+            self.dreaming = False
+            await self.sd_client.interrupt()
+            await self.reset_generation()
+
 
     @commands.cooldown(rate=5, per=1, bucket=Bucket.member)
     @commands.command()
@@ -295,26 +364,23 @@ class Chatbot(commands.Bot):
         """Adds a word or phrase to the current prompt for image generation. Ex !prompt a forest"""
         # Update's current prompt with the message
 
-        sanitized_prompt = self._sanitize_command(7, ctx)
+        sanitized_prompt = self._sanitize_command(ctx.message.content,8)
         logger.debug(
             f"{ctx.author.name} requesting to add  to prompt. Message | {ctx.message.content}"
         )
-        self.positive_prompt_options.add(sanitized_prompt)
+        self.handle_prompt(sanitized_prompt,ctx.author.name)
 
-        if self.mode == BOTMODE.COLLABORATE:
-            self.positive_prompt = ", ".join(self.positive_prompt_options)
-        elif self.mode == BOTMODE.COMPETE:
-            self.positive_prompt = random.choice(self.positive_prompt_options)
+        
         # await ctx.send(f"Prompt for Generation {self.iteration_counter} is now: {self.positive_prompt}")
 
-    # @commands.cooldown(rate=1,per=300,bucket=Bucket.user)
-    # async def event_join(channel: Channel, user:User):
-    #     await channel.send(f"Welcome {user.name}! If this is your first time or if it has been a while, you can always use the command !help to get started.")
+    @commands.cooldown(rate=1,per=300,bucket=Bucket.channel)
+    async def event_join(self,channel: Channel, user:User):
+        await channel.send(f"Welcome {user.name}! If this is your first time or if it has been a while, you can always use the command !help to get started. Otherwise, just throw things into chat and see what the ai creates!")
 
     @commands.command()
     async def negative(self, ctx: commands.Context):
         """Adds a word or phrase to the current negative prompt. Ex !negative deformed"""
-        sanitized_prompt = self._sanitize_command(8, ctx)
+        sanitized_prompt = self._sanitize_command(ctx.message.content,9)
         logger.debug(
             f"{ctx.author.name} requesting to add  to negative prompt. Message | {ctx.message.content}"
         )
@@ -341,6 +407,6 @@ if __name__ == "__main__":
     # bot.update_cam.change_interval(seconds=config.target_fps)
     bot.submit_generation.start(stop_on_error=False)
     bot.update_metrics.start(stop_on_error=False)
-    bot.send_frame.start(stop_on_error=False)
+
 
     bot.run()
