@@ -18,6 +18,8 @@ class CurrentImageView(View):
         )
 
     def _get_timer_color(self, time_left: timedelta):
+        if time_left is None:
+           time_left = timedelta(seconds=0) 
         if time_left > timedelta(seconds=30):
             return (255, 255, 255)
         if time_left > timedelta(seconds=10):

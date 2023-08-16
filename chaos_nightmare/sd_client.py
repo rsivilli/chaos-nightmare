@@ -136,7 +136,9 @@ class SDClient(object):
         base_txt2img["negative_prompt"] = negative_prompt
         async with timeout(300):
             async with self.session.post(uri, json=base_txt2img) as response:
+                response.raise_for_status()
                 data = await response.json()
+
 
         return ImageResponse(**data)
 
@@ -154,10 +156,7 @@ class SDClient(object):
         base_img2img["init_images"] = [input_image]
         async with timeout(300):
             async with self.session.post(uri, json=base_img2img) as response:
-                if response.status != 200:
-                    logger.error(
-                        f"Non 200 status received from SD | message = {response.reason}"
-                    )
+                response.raise_for_status()
                 data = await response.json()
 
         return ImageResponse(**data)
