@@ -3,3 +3,7 @@ __pycache__
 
 loading_images
 safe_images
+error_images
+
+
+*.json

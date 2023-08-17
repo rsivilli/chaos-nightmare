@@ -20,6 +20,6 @@ class Config(BaseSettings):
     error_image_dir: str = "./error_images"
     random_prompt_file: str = "./random_prompts.json"
     gpt_prompt_file:str = "./gpt_prompts.json"
-    chat_key:str = None
+    chat_key:str|None = None
 
 config = Config()

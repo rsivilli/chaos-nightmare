@@ -40,7 +40,7 @@ class CurrentImageView(View):
         h = self.image.height
 
         col_text = (
-            f"Time till image collection: {str(time_till_image_gen).split('.')[0]}"
+            f"Time till prompt submission: {str(time_till_image_gen).split('.')[0]}"
         )
         offset_x = self.font.getlength(col_text)
         d1.text(

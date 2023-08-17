@@ -30,7 +30,7 @@ from chaos_nightmare.views import (
     PromptView,
     ContributorView
 )
-
+import asyncio
 from chaos_nightmare.routines import send_frame
 from chaos_nightmare.prompt_gen import PromptGenerator
 
@@ -158,6 +158,7 @@ class Chatbot(commands.Bot):
 
     @routines.routine(minutes=1.5,wait_first=True)
     async def submit_generation(self):
+        
         if len(self.connected_channels) < 1:
             logger.error("We are not currently connected to any channels!")
             return
@@ -169,7 +170,6 @@ class Chatbot(commands.Bot):
                 "Looks like we're still generating an image. Skipping this call"
             )
             return
-        
         elif len(self.positive_prompt) < 4:
             logger.info("Current Prompt is less than 4 characters. Going to skip")
             tmp = await self.prompt_generator.get_random_prompt()
@@ -181,7 +181,7 @@ class Chatbot(commands.Bot):
                     f"Looks like folks are taking a break. I'm going to sleep, but send me a message to wake me up"
                 )
         
-            
+        
 
 
         # We're assuming this is only for one channel
@@ -190,7 +190,14 @@ class Chatbot(commands.Bot):
 
         logger.info("Submitting for image generation")
         self.generating_image = True
-        self.check_progress.start(stop_on_error=False)
+        try: 
+            self.check_progress.start(stop_on_error=False)
+        except RuntimeError as e:
+            logger.warning("Check progress already running and could not start")
+            logger.error(e)
+        except Exception as e:
+            logger.error("Ran into a new error starting check_progress. Check logs")
+            logger.error(e)
         self.iteration_counter += 1
         try: 
             if len(self.last_image) > 0:
@@ -226,6 +233,7 @@ class Chatbot(commands.Bot):
             logger.error("Error submitting to generation")
             logger.error(error)
             self.check_progress.stop()
+            await asyncio.sleep(0.5)
             self.main_view.set_image(random.choice(
                 self.error_images
             ))
