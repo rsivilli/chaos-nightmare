@@ -9,7 +9,7 @@ from aiohttp import ClientSession
 from async_timeout import timeout
 import asyncio
 from chaos_nightmare.util import logging
-
+import datetime
 logger = logging.getLogger(__name__)
 
 base_img2img = {
@@ -138,9 +138,10 @@ class SDClient(object):
             async with self.session.post(uri, json=base_txt2img) as response:
                 response.raise_for_status()
                 data = await response.json()
-
-
-        return ImageResponse(**data)
+        start = datetime.datetime.now()
+        out = ImageResponse(**data)
+        logger.info(f"casting took {datetime.datetime.now()-start}")
+        return out
 
     async def img2img(
         self,
