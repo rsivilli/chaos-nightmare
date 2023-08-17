@@ -1,7 +1,6 @@
 import numpy as np
 import random
-from twitchio.ext.routines import Routine, compute_timedelta
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
 from PIL import Image
 from json import load

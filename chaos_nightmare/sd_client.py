@@ -1,15 +1,14 @@
-from numpy._typing import NDArray
-from numpy import uint8
 from pydantic import BaseModel
 import base64
 from PIL import Image
 import io
-import numpy as np
+
 from aiohttp import ClientSession
 from async_timeout import timeout
 import asyncio
 from chaos_nightmare.util import logging
 import datetime
+
 logger = logging.getLogger(__name__)
 
 base_img2img = {

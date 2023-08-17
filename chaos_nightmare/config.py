@@ -6,8 +6,8 @@ load_dotenv()
 
 class Config(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="chaos_nightmare_")
-    access_token: str
-    target_fps: float = 0.1
+    access_token: str #twitch access token
+    target_fps: float = 0.1 
     image_height: int = 1024
     image_width: int = 1024
     base_sd_url: str = "http://localhost:7860"
@@ -19,7 +19,8 @@ class Config(BaseSettings):
     loading_image_dir: str = "./loading_images"
     error_image_dir: str = "./error_images"
     random_prompt_file: str = "./random_prompts.json"
-    gpt_prompt_file:str = "./gpt_prompts.json"
-    chat_key:str|None = None
+    gpt_prompt_file: str = "./gpt_prompts.json"
+    chat_key: str | None = None
+
 
 config = Config()

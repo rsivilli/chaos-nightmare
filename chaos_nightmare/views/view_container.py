@@ -1,6 +1,5 @@
 import numpy as np
 from chaos_nightmare.views.core import View
-from PIL import Image
 from dataclasses import dataclass
 from chaos_nightmare.util.logging_config import logging
 from datetime import datetime
