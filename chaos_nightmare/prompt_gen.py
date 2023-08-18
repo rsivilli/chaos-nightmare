@@ -20,7 +20,7 @@ class PromptGenerator(object):
             openai.api_key = config.chat_key
             self.api_key_provided = True
     def _clean_gpt_response(self,response_content:str)->str:
-        return response_content.replace("\n"," ")
+        return response_content.replace("\n"," ").replace('"',"'")
     async def get_random_prompt(self)->str:
         if self.api_key_provided:
             try:
