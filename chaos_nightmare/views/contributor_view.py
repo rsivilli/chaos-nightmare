@@ -46,7 +46,7 @@ class ContributorView(View):
         formated_text = [f"{contributor.word_count} {contributor.name}" for contributor in tmp[:min([10,len(tmp)])]]
         for i in range(len(formated_text)):
             offset_x =self.font.getlength(formated_text[i])
-            d1.text((int(self.image.width / 2 - offset_x / 2), 50), formated_text[i], font=self.font, fill=(255, 255, 255))
+            d1.text((int(self.image.width / 2 - offset_x / 2), i*self.font.size+50), formated_text[i], font=self.font, fill=(255, 255, 255))
         self.draw_left()
         self.draw_right()
 
