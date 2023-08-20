@@ -95,7 +95,7 @@ class Chatbot(commands.Bot):
         
         self.send_frame:Routine = send_frame
         
-        self.send_frame.start(self.cam,self.view_container,stop_on_error=False)
+        
         
         super().__init__(
             token=config.access_token,
@@ -223,7 +223,12 @@ class Chatbot(commands.Bot):
             logger.error("Error submitting to generation")
             logger.error(error)
             self.check_progress.stop()
-            await asyncio.sleep(0.5)
+            # This is mostly for if the image gen is taking longer than the timeout. Any other case is just going to throw another error
+            try:
+                await self.sd_client.interrupt()
+            except:
+                pass
+            
             self.main_view.set_image(random.choice(self.error_images))
 
         self.generating_image = False
@@ -235,6 +240,8 @@ class Chatbot(commands.Bot):
             self.interrupted = False
         elif self.iteration_counter >= self.iteration_thresh:
             await self.reset_generation()
+
+
 
 
 
@@ -297,6 +304,10 @@ class Chatbot(commands.Bot):
         # Alerting that we are logged in and ready to use commands
         logger.info(f"Logged in as | {self.nick}")
         logger.info(f"User id is | {self.user_id}")
+        bot.submit_generation.start(stop_on_error=False)
+        bot.update_metrics.start(stop_on_error=False)
+        self.send_frame.start(self.cam,self.view_container,stop_on_error=False)
+
 
     # @commands.cooldown(rate =1 ,per = 60, bucket=Bucket.member)
     @commands.command()
@@ -388,7 +399,5 @@ class Chatbot(commands.Bot):
 if __name__ == "__main__":
     config = Config()
     bot = Chatbot(config)
-    bot.submit_generation.start(stop_on_error=False)
-    bot.update_metrics.start(stop_on_error=False)
-
+    
     bot.run()
