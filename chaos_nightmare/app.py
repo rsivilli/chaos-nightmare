@@ -58,7 +58,7 @@ class Chatbot(commands.Bot):
     last_image = ""
     iteration_counter: int = 0
     iteration_thresh = 5
-    always_negative = "child, nude, naked, breasts, penis, sex, murder, loli "
+    always_negative = "child, nude, naked, breasts, penis, sex, murder, loli, logo, copyright, watermark"
     safe_images: list[Image.Image] = []
     loading_images: list[Image.Image] = []
     stream_progress: bool = False
@@ -96,7 +96,8 @@ class Chatbot(commands.Bot):
         self.prompt_generator = PromptGenerator(config)
         
         self.send_frame:Routine = send_frame
-        self.send_frame.start(self.cam,self.view_container)
+        
+        self.send_frame.start(self.cam,self.view_container,stop_on_error=False)
         
         super().__init__(
             token=config.access_token,
@@ -267,7 +268,12 @@ class Chatbot(commands.Bot):
             iteration_thresh=self.iteration_thresh,
             iteration_counter=self.iteration_counter,
         )
-
+    async def welcome_message(self):
+        if len(self.connected_channels) == 0:
+            return
+        channel: Channel = self.connected_channels[0]
+        await channel.send(f"Welcome to the social experiment! If this is your first time or if it has been a while, you can always use the command !help to get started. Otherwise, just throw things into chat and see what the ai creates!")
+    
     @routines.routine(seconds=2)
     async def check_progress(self):
         if not self.generating_image:
@@ -381,9 +387,7 @@ class Chatbot(commands.Bot):
         
         # await ctx.send(f"Prompt for Generation {self.iteration_counter} is now: {self.positive_prompt}")
 
-    @commands.cooldown(rate=1,per=300,bucket=Bucket.channel)
-    async def event_join(self,channel: Channel, user:User):
-        await channel.send(f"Welcome {user.name}! If this is your first time or if it has been a while, you can always use the command !help to get started. Otherwise, just throw things into chat and see what the ai creates!")
+
 
     @commands.command()
     async def negative(self, ctx: commands.Context):
