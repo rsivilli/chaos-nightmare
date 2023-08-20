@@ -9,10 +9,10 @@ import random
 
 logger = logging.getLogger(__name__)
 
-@routines.routine(seconds=1)
-async def send_frame(cam:Camera, view_container:ViewContainer):
-    cam.send(view_container.generate_view())
 
+@routines.routine(seconds=1)
+async def send_frame(cam: Camera, view_container: ViewContainer):
+    cam.send(view_container.generate_view())
 
 
 @routines.routine(minutes=0.5)
@@ -24,9 +24,7 @@ async def submit_generation(self):
     channel: Channel = self.connected_channels[0]
 
     if self.generating_image:
-        logger.info(
-            "Looks like we're still generating an image. Skipping this call"
-        )
+        logger.info("Looks like we're still generating an image. Skipping this call")
         return
     if len(self.positive_prompt) < 4:
         logger.info("Current Prompt is less than 4 characters. Going to skip")
@@ -64,9 +62,7 @@ async def submit_generation(self):
         logger.debug("Done with decoding image")
 
         if is_filtered_image(frame):
-            logger.info(
-                "Filtered image detected. Injecting safe image and resetting"
-            )
+            logger.info("Filtered image detected. Injecting safe image and resetting")
             frame = self.get_safe_image()
             await self.reset_generation()
 
@@ -84,12 +80,10 @@ async def submit_generation(self):
         elif self.iteration_counter >= self.iteration_thresh:
             await self.reset_generation()
 
+
 @submit_generation.error
-async def submit_generation_on_error(error:Exception):
+async def submit_generation_on_error(error: Exception):
     logger.error("Error submitting to generation")
     logger.error(error)
     self.check_progress.stop()
-    self.main_view.set_image(random.choice(
-        self.error_images
-    ))
-    
+    self.main_view.set_image(random.choice(self.error_images))
